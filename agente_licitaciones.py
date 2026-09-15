@@ -202,6 +202,18 @@ def parsear_entrada(entry):
     # Enlace a la ficha pública.
     enlace = texto(entry, "atom:link/@href") or texto(entry, "atom:id")
 
+    # Lugar de ejecución (puede venir en varios sitios del CODICE).
+    lugar = (
+        texto(entry, ".//cac:RealizedLocation/cac:Address/cbc:CityName")
+        or texto(entry, ".//cac:RealizedLocation/cac:Address/cac:Country/cbc:Name")
+        or texto(entry, ".//cac:RealizedLocation//cbc:CountrySubentity")
+        or texto(entry, ".//cac:Address/cbc:CityName")
+        or texto(entry, ".//cbc:CountrySubentity")
+    )
+    # A veces solo hay código de provincia (CountrySubentityCode); lo usamos de reserva.
+    if not lugar:
+        lugar = texto(entry, ".//cbc:CountrySubentityCode")
+
     # Fecha de actualización.
     actualizado = texto(entry, "atom:updated")
 
@@ -211,6 +223,7 @@ def parsear_entrada(entry):
         "importe": (importe or "").strip(),
         "cpvs": [c.strip() for c in cpvs],
         "criterios": " / ".join(c.strip() for c in criterios if c.strip()),
+        "lugar": (lugar or "").strip(),
         "enlace": (enlace or "").strip(),
         "actualizado": (actualizado or "").strip(),
     }
@@ -369,10 +382,16 @@ def construir_html(resultados):
 
     filas = ""
     for lic in resultados:
+        enlace_html = (
+            f'<a href="{lic["enlace"]}">Ver ficha</a>' if lic["enlace"] else "—"
+        )
         filas += f"""
         <tr>
           <td style="padding:8px;border:1px solid #ddd;vertical-align:top;">
             <a href="{lic['enlace']}">{lic['titulo'] or '(sin título)'}</a>
+          </td>
+          <td style="padding:8px;border:1px solid #ddd;vertical-align:top;">
+            {lic['lugar'] or '—'}
           </td>
           <td style="padding:8px;border:1px solid #ddd;vertical-align:top;white-space:nowrap;">
             {formatear_importe(lic['importe'])}
@@ -382,6 +401,9 @@ def construir_html(resultados):
           </td>
           <td style="padding:8px;border:1px solid #ddd;vertical-align:top;">
             {lic['criterios'] or '—'}
+          </td>
+          <td style="padding:8px;border:1px solid #ddd;vertical-align:top;white-space:nowrap;">
+            {enlace_html}
           </td>
         </tr>"""
 
@@ -393,9 +415,11 @@ def construir_html(resultados):
       <thead>
         <tr style="background:#f2f2f2;">
           <th style="padding:8px;border:1px solid #ddd;text-align:left;">Título</th>
+          <th style="padding:8px;border:1px solid #ddd;text-align:left;">Lugar</th>
           <th style="padding:8px;border:1px solid #ddd;text-align:left;">Importe licitación</th>
           <th style="padding:8px;border:1px solid #ddd;text-align:left;">Descripción</th>
           <th style="padding:8px;border:1px solid #ddd;text-align:left;">Criterios de adjudicación</th>
+          <th style="padding:8px;border:1px solid #ddd;text-align:left;">Enlace</th>
         </tr>
       </thead>
       <tbody>{filas}</tbody>
@@ -445,4 +469,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
