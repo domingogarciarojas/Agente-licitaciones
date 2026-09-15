@@ -52,17 +52,65 @@ MAX_PAGINAS = int(os.environ.get("MAX_PAGINAS", "12"))
 #   79xxxxxx  -> servicios empresariales, de consultoría y gestión
 #   80xxxxxx  -> servicios de enseñanza y formación
 # Se puede afinar más (p.ej. 79400000, 80500000) para reducir ruido.
+# Códigos CPV que nos interesan (perfil CES Institute: auditorías industriales y
+# energéticas, diagnóstico e implantación de normas ISO). Filtramos por PREFIJO.
+#   79212  -> servicios de auditoría
+#   71314  -> energía y servicios conexos / asesoramiento eficiencia energética
+#   71315  -> servicios técnicos de instalaciones de edificios (energía)
+#   71356  -> servicios técnicos (ingeniería industrial)
+#   71630  -> servicios de inspección y ensayo técnicos
+#   71631  -> servicios de inspección técnica (instalaciones)
+#   90714  -> auditoría medioambiental
+#   79411  -> consultoría de gestión (implantación de sistemas de gestión)
+#   73220  -> servicios de consultoría en desarrollo
+#   80500,80510,80520,80530  -> servicios de formación (acotados por keyword al perfil)
 CPV_PREFIJOS = tuple(
-    p.strip() for p in os.environ.get("CPV_PREFIJOS", "794,7941,7942,805,8051,8053").split(",")
+    p.strip() for p in os.environ.get(
+        "CPV_PREFIJOS",
+        "79212,71314,71315,71356,71630,71631,90714,79411,73220,80500,80510,80520,80530",
+    ).split(",")
 )
 
 # Palabras clave de refuerzo (por si el CPV no viene bien informado).
+# Palabras clave de refuerzo (perfil CES Institute). Si el CPV no viene bien
+# informado, basta con que aparezca UNA de estas en título o descripción.
 KEYWORDS = tuple(
     k.strip().lower()
     for k in os.environ.get(
         "KEYWORDS",
-        "consultor,consultoría,asistencia técnica,formación,formativo,capacitación,docencia,curso",
+        "auditoría energética,auditoria energetica,eficiencia energética,eficiencia energetica,"
+        "iso 9001,iso 14001,iso 45001,iso 50001,iso 27001,iso 17025,"
+        "sistema de gestión,sistema de gestion,certificación iso,certificacion iso,"
+        "implantación de la norma,implantacion de la norma,auditoría industrial,auditoria industrial,"
+        "seguridad industrial,gestión energética,gestion energetica,diagnóstico energético,"
+        "diagnostico energetico,servicios de auditoría,servicios de auditoria,"
+        "inspección reglamentaria,inspeccion reglamentaria,inspección periódica,inspeccion periodica,"
+        "organismo de control,baja tensión,baja tension,alta tensión,alta tension,"
+        "instalación térmica,instalacion termica,rite,instalación frigorífica,instalacion frigorifica,"
+        "equipos a presión,equipos a presion,almacenamiento de productos químicos,apq,"
+        "instalación de gas,instalacion de gas,legalización de instalaciones,legalizacion de instalaciones,"
+        "cumplimiento reglamentario,seguridad industrial,"
+        "formación en prevención,formacion en prevencion,curso de eficiencia energética,"
+        "curso de eficiencia energetica,formación iso,formacion iso,curso iso,"
+        "formación en seguridad industrial,formacion en seguridad industrial,"
+        "curso de auditor,formación de auditores,formacion de auditores,"
+        "formación energética,formacion energetica,curso de gestión energética,"
+        "curso de gestion energetica,capacitación técnica industrial,capacitacion tecnica industrial",
     ).split(",")
+)
+
+# Palabras que DESCARTAN una licitación aunque coincida en CPV o keyword.
+# Sirve para quitar el ruido típico (obras, limpieza, formación genérica, TI...).
+EXCLUIR = tuple(
+    e.strip().lower()
+    for e in os.environ.get(
+        "EXCLUIR",
+        "obras,obra civil,limpieza,jardinería,jardineria,catering,seguridad privada,vigilancia,"
+        "suministro de,mobiliario,software,desarrollo de aplicaciones,mantenimiento informático,"
+        "mantenimiento informatico,auditoría de cuentas,auditoria de cuentas,auditoría contable,"
+        "auditoria contable,seguros,póliza,poliza,combustible,vehículos,vehiculos",
+    ).split(",")
+    if e.strip()
 )
 
 # Importe máximo al que os presentáis (EUR). Por encima se descarta. 0 = sin límite.
@@ -204,9 +252,43 @@ def importe_ok(importe_str):
         return True  # si no se puede parsear, no descartamos
 
 
+def esta_excluida(titulo, descripcion):
+    blob = f"{titulo} {descripcion}".lower()
+    return any(x in blob for x in EXCLUIR)
+
+
+def es_cpv_formacion(cpvs):
+    return any(c.startswith("805") for c in cpvs)
+
+
+# Materias propias de CES: la formación solo interesa si toca una de estas.
+MATERIAS_CES = (
+    "iso", "energ", "auditor", "eficiencia", "seguridad industrial", "instalacion",
+    "instalación", "prevención", "prevencion", "reglament", "gestión energética",
+    "gestion energetica", "medioambient", "calidad", "45001", "14001", "9001",
+    "50001", "27001", "riesgos laborales", "baja tensión", "baja tension",
+    "alta tensión", "alta tension", "gas", "frigorific", "térmica", "termica",
+    "equipos a presión", "equipos a presion", "apq",
+)
+
+
+def toca_materia_ces(titulo, descripcion):
+    blob = f"{titulo} {descripcion}".lower()
+    return any(m in blob for m in MATERIAS_CES)
+
+
 def interesa(lic):
+    # 1) Debe encajar por CPV o por palabra clave.
     if not (coincide_cpv(lic["cpvs"]) or coincide_keyword(lic["titulo"], lic["descripcion"])):
         return False
+    # 2) Se descarta si contiene una palabra de la lista de exclusión.
+    if esta_excluida(lic["titulo"], lic["descripcion"]):
+        return False
+    # 3) Si es formación genérica (CPV 805xx), solo pasa si toca una materia de CES.
+    #    Así evitamos formación de idiomas, ofimática, etc. que no os interesa.
+    if es_cpv_formacion(lic["cpvs"]) and not toca_materia_ces(lic["titulo"], lic["descripcion"]):
+        return False
+    # 4) Respeta el importe máximo si se ha configurado.
     if not importe_ok(lic["importe"]):
         return False
     return True
@@ -363,3 +445,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
