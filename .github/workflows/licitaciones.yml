@@ -1,0 +1,36 @@
+name: Agente licitaciones semanal
+
+on:
+  schedule:
+    # Cada lunes a las 07:00 UTC (08:00/09:00 hora peninsular según horario).
+    - cron: "0 7 * * 1"
+  workflow_dispatch:  # permite lanzarlo a mano desde la pestaña Actions.
+
+jobs:
+  ejecutar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Ejecutar agente
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          # Opcionales (descomenta en el repo si quieres afinar):
+          # CPV_PREFIJOS: "794,805"
+          # IMPORTE_MAX: "150000"
+          # DIAS_VENTANA: "7"
+        run: python agente_licitaciones.py
